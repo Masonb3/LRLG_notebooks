@@ -33,7 +33,6 @@ def init_white_config(lam, mu, n):
     return  wc_pos
 
 # Note here that wc_x and wc_y define respective positions for ALL white checkers
-#    wc_curr should be [x,y] of the wc in question
 def get_wc_degree(wc_index, bc_pos, wc_pos, n):
     
     wc_x = wc_pos[:,0]
@@ -53,7 +52,6 @@ def get_wc_degree(wc_index, bc_pos, wc_pos, n):
     
     for i in range(0,len(bc_x)):
         if (bc_x[i] <= x and bc_y[i] <= y):
-            #print("BC ", bc_x[i], bc_y[i], " vs. ", x,y)
             bc_NW += 1
         
         
@@ -92,7 +90,9 @@ def get_total_wc_degree(bc_pos, wc_pos, n):
     total_deg = 0
     
     for i in range(0, len(wc_pos[:,0])):
-        total_deg += get_wc_degree(i, bc_pos, wc_pos, n)
+        cur_deg = get_wc_degree(i, bc_pos, wc_pos, n)
+        print(cur_deg)
+        total_deg += cur_deg
         
     return total_deg
 
@@ -167,9 +167,6 @@ def check_happy(bc_pos, wc_pos, wc_test, n):
 
 def get_move_left(bc_pos, wc_pos, wc_ind, n):
     
-    bc_x = bc_pos[:,0]
-    bc_y = bc_pos[:,1]
-    
     wc_new_config = wc_new_config_x = copy.deepcopy(wc_pos)
     
     print("TRYING TO MOVE LEFT WITH WC POS: ", wc_pos)
@@ -197,14 +194,11 @@ def get_move_left(bc_pos, wc_pos, wc_ind, n):
         wc0 = wc_pos[wc_ind[0]]
         wc1 = wc_pos[wc_ind[1]]
         
-        a = np.where(bc_x == wc0[0])[0][0]
-        b = np.where(bc_x == wc1[0])[0][0]
+        a = np.where(bc_pos[:,0] == wc0[0])[0][0]
+        b = np.where(bc_pos[:,0] == wc1[0])[0][0]
         
         bc0 = bc_pos[a] 
         bc1 = bc_pos[b]
-        
-        #bc0 = bc_pos[bc_x.index(wc0[0])]
-        #bc1 = bc_pos[bc_x.index(wc1[0])]
         
         wc_new_config[wc_ind[0]] = bc0
         wc_new_config[wc_ind[1]] = bc1
@@ -296,173 +290,168 @@ def exists_blocker(wc_pos, wc1, wc2, n):
                 
     return exists, wc03
 
-# bc_pos and wc_pos are arrays of (r,c) ordered symm. pairs, stage is either 1 or 2
-# desc, asc handle moving rows/columns (along with taking symm pairs) 
+# Takes board with white checker on either NW or SE diagonal and pops it, 
+# returning partition value and clean board
+def pop_board(wc_pos,n):
+    clean_board = []
+    
+    part_val = 0
+    skip_index = -1
+    if(0 in wc_pos[:,0]):
+        skip_index = 0
+        part_val = n
+    else: 
+        skip_index = 2*n - 1 
+        part_val = -n
+        
+    for i in range(0, len(wc_pos)):
+        wc = wc_pos[i]
+        if (wc[1] != skip_index):
+            # Shift down since board is getting smaller
+            clean_board.append([wc[0]-1, wc[1]-1])
+        
+    return np.array(clean_board, dtype=int), part_val
 
-def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
+################################################################################################################## CASE MOVES
+
+def get_case1_move(wc_pos, asc_ind):
+    # TWO MUST ASCEND AT THE SAME TIME OR SYMMETRY CONDITION IS VIOLATED
     
-    bc_x = bc_pos[:,0]
-    bc_y = bc_pos[:,1]
+    temp_board = copy.deepcopy(wc_pos)
+    k = len(asc_ind)
+    if (k != 2):
+        raise Exception("Expect 2 checkers to ascend for get_case1_move, but ", k, " checkers want to move.")
+    else:
+        temp_board[asc_ind[0],0] -= 1
+        temp_board[asc_ind[1],0] -= 1
+    mult = 1
     
-    bc_x_next = bc_pos_next[:,0]
-    bc_y_next = bc_pos_next[:,1]
+    return temp_board, mult
+    
+def get_case2_move(wc_pos, ind_a, ind_b):
+
+    temp_board = copy.deepcopy(wc_pos)
+    
+    temp_col = temp_board[ind_a, 1]
+    temp_board[ind_a, 1] = temp_board[ind_b, 1]
+    temp_board[ind_b, 1] = temp_col
+    
+    mult = 1
+    
+    return temp_board, mult
+
+def get_horiz_move(bc_pos, bc_pos_next, wc_pos, n):
+    
+    res_boards = []
+    res_mults = []
+    res_cases = []
     
     wc_x = wc_pos[:,0]
     wc_y = wc_pos[:,1]
     
-    # Determines whether or not this move breaks into multiple cases. Cases returned as strings for verification
-    split = False
-    cases = []
-    mults = np.array([], dtype=int)
-    
-    desc = np.array(desc, dtype=int)
-    asc = np.array(asc, dtype=int)
-    
-    desc_rows = desc[:,0]
-    asc_rows = asc[:,0]
-    
-    wc_new_config_x = copy.deepcopy(wc_x)
-    wc_new_config_y = copy.deepcopy(wc_y)
-    
-    wc_split_config_x = copy.deepcopy(wc_x)
-    wc_split_config_y = copy.deepcopy(wc_y)
-    
-    unhappy_ind = np.array([], dtype=int)
-    desc_row_ind = np.array([], dtype=int)
-    asc_row_ind = np.array([], dtype=int)
-    desc_row_match = np.array([], dtype=int)
-    asc_row_match = np.array([], dtype=int)
-    
     OLD_TOTAL_DEG = get_total_wc_degree(bc_pos, wc_pos, n)
     
-    for i in range(0, len(wc_x)):
-        happiness, reasons = check_happy(bc_pos_next, wc_pos, wc_pos[i], n)
-        if(not happiness):
-            unhappy_ind = np.append(unhappy_ind, i)
-        if(wc_x[i] in desc_rows):
-            desc_row_ind = np.append(desc_row_ind, i)
-            desc_row_match = np.append(desc_row_match, wc_x[i])
-        if(wc_x[i] in asc_rows):
-            asc_row_ind = np.append(asc_row_ind, i)
-            asc_row_match = np.append(asc_row_match, wc_x[i])
-            
-    consec = -1
-    partner = -1
-    for s in desc_row_ind:
-        for t in asc_row_ind:
-            if (wc_x[s] + 1 == wc_x[t]):
-                consec = s
-                partner = t
-                # print("FOUND CONSEC + PARTNER at ", consec, partner)
-                
-    #Stages don't matter for cases 0,1,2 so those are done first
-    if len(unhappy_ind) == 0:
-        # CASE 0: where all are happy. Do nothing in this case.
-        cases.append("Stage " + str(stage) + " Case 0")
-        mults = np.append(mults, 1)
-    
-    elif ((len(desc_row_ind) == 0 ) and (len(asc_row_ind) > 0)):
-        
-        # CASE 1: where moving up as a result of wc on asc row(s)
-        for k in asc_row_ind:
-            wc_new_config_x[k] -= 1
-        cases.append("Stage " + str(stage) + " Case 1")
-        mults = np.append(mults, 1)
-        
-    elif (consec != -1):
-        # CASE 2: where on consecutive moving rows
-        # Swap move
-        wc_new_config_y[s] = wc_y[t]
-        wc_new_config_y[t] = wc_y[s]
-        cases.append("Stage " + str(stage) + " Case 2")
-        mults = np.append(mults, 1)
-    elif desc_rows[0] == n-1 and n == 1:
+    if (n == 1):
         # only one white checker, and if it is in bottom right, it stays, otherwise it moves to top left
-        if (wc_pos[0][0] == n and wc_pos[0][1] == n):
-            wc_new_config_y[0] = n
-            cases.append("n=1, ended in bottom right")
-            mults = np.append(mults, 1)
-        else: 
-            wc_new_config_y[0] = 0
-            cases.append("n=1, ended in top left")
-            mults = np.append(mults, 1)
+        small_board = copy.deepcopy(wc_pos)
+        if not (wc_pos[0, 0] == n and wc_pos[0, 1] == n):
+            small_board[0, 1] = 0
+            small_board[0, 0] = 0
+        res_boards.append(small_board)
+        res_mults.append(1)
+        res_cases.append("n=1 move")
+     
+    else:
+        # Handling white checker on row below horizontal midline
+        if (n in wc_x):
+            print("Horizontal move with wc on lower row, n = ", n)
+            print ("WCPOS", wc_pos)
+            temp_board = copy.deepcopy(wc_pos)
             
-    elif desc_rows[0] == n-1 and len(desc_row_ind) > 0:
-        # What happens when moving across horizontal?
-        # I think split one for going down and one for going to left
-        wc_onr_ind = np.where(wc_y == 2*n-1)[0][0]
-                
-        horiz_stay_config = copy.deepcopy(wc_pos)
-        horiz_move_config = copy.deepcopy(wc_pos)
-        
-        moved_far = False
-        stayed = False
-        
-        
-        # FAR MOVE - WC CROSSES HORIZ
-        move_search = True
-        sw_to_check = get_SW(wc_pos, n)
-        search_count = 0
-        
-        # Maybe we don't need to move a SW checker to compensate
-        horiz_move_config[wc_onr_ind][1] = 0
-        test_move_deg = get_total_wc_degree(bc_pos_next, horiz_move_config, n)
-        if test_move_deg == OLD_TOTAL_DEG:
-            move_search = False
-            moved_far = True
-        
-        while move_search and search_count < len(sw_to_check):
-            sw_wc_curr = sw_to_check[search_count]
-            print("Trying to put ", sw_wc_curr, " to right during horizontal move.")
-            sw_wc_curr_ind = np.where(wc_y == sw_wc_curr[1])[0][0]
-            horiz_move_config[sw_wc_curr_ind][1] = symm_ind(sw_wc_curr[1], n)
-            horiz_move_config[wc_onr_ind][1] = 0
+            wc_low_ind = np.where(wc_x == n)[0][0]
+            if(temp_board[wc_low_ind, 1] == 2*n -1):
+                # If checker is on last column, it can stay
+                res_boards.append(temp_board)
+                res_mults.append(1)
+                res_cases.append("Horizontal cross with wc stay")
+            else:
+                # Otherwise, needs to move up
+                temp_board[wc_low_ind, 0] -= 1
+                res_boards.append(temp_board)
+                res_mults.append(1)
+                res_cases.append("Horizontal cross with wc ascend")
+            
+        # Case for checker above horizontal midline
+        else:
+            wc_onr_ind = np.where(wc_y == 2*n-1)[0][0]
+
+            horiz_stay_config = copy.deepcopy(wc_pos)
+            horiz_move_config = copy.deepcopy(wc_pos)
+
+            moved_far = False
+            stayed = False
+
+            # FAR MOVE - WC CROSSES HORIZ
+            move_search = True
+            sw_to_check = get_SW(wc_pos, n)
+            search_count = 0
+
+            # Maybe we don't need to move a SW checker to compensate
+            horiz_move_config[wc_onr_ind, 1] = 0
             test_move_deg = get_total_wc_degree(bc_pos_next, horiz_move_config, n)
-            if test_move_deg == OLD_TOTAL_DEG: 
+            if test_move_deg == OLD_TOTAL_DEG:
                 move_search = False
                 moved_far = True
-            else:
-                # Reset the config to test and move to the next SW checker
-                horiz_move_config = copy.deepcopy(wc_pos)
-                search_count += 1
-        
-        # STAY MOVE - swap with rightmost wc in SE region
-        se_to_swap, se_to_swap_ind = get_right_SE(wc_pos, n)
-        print("WC_POS, n", wc_pos, n, "\n")
-        print("GOT RIGHT SE CHECKER: ", se_to_swap)
-        
-        horiz_stay_config[se_to_swap_ind][1] = 2*n-1
-        horiz_stay_config[wc_onr_ind][1] = se_to_swap[1]
-        
-        test_stay_deg = get_total_wc_degree(bc_pos_next, horiz_stay_config, n)
-        if test_stay_deg == OLD_TOTAL_DEG: 
-            stayed = True
-        else: 
-            print("HERE'S THE FAILING STAY CONFIG")
-            horiz_stay_board = pos_to_board(horiz_stay_config, n, "O")
-            bc_stay_board = pos_to_board(bc_pos_next, n, "X")
-            print_board(add_boards(horiz_stay_board, bc_stay_board))
-            print("OLD_TOTAL_DEG", OLD_TOTAL_DEG, "\nTEST_STAY_DEG", test_stay_deg)
-        
-        if moved_far:
-            cases.append("Far move on horizontal cross")
-            mults = np.append(mults, 2)
-            wc_new_config_y = horiz_move_config[:,1]
-            
+
+            while move_search and search_count < len(sw_to_check):
+                sw_wc_curr = sw_to_check[search_count]
+                sw_wc_curr_ind = np.where(wc_y == sw_wc_curr[1])[0][0]
+                horiz_move_config[sw_wc_curr_ind, 1] = symm_ind(sw_wc_curr[1], n)
+                horiz_move_config[wc_onr_ind, 1] = 0
+                test_move_deg = get_total_wc_degree(bc_pos_next, horiz_move_config, n)
+                if test_move_deg == OLD_TOTAL_DEG: 
+                    move_search = False
+                    moved_far = True
+                else:
+                    # Reset the config to test and move to the next SW checker
+                    horiz_move_config = copy.deepcopy(wc_pos)
+                    search_count += 1
+
+            # STAY MOVE - swap with rightmost wc in SE region
+            se_to_swap, se_to_swap_ind = get_right_SE(wc_pos, n)
+
+            horiz_stay_config[se_to_swap_ind, 1] = 2*n-1
+            horiz_stay_config[wc_onr_ind, 1] = se_to_swap[1]
+
+            test_stay_deg = get_total_wc_degree(bc_pos_next, horiz_stay_config, n)
+            if test_stay_deg == OLD_TOTAL_DEG: 
+                stayed = True
+
+            if moved_far:
+                res_boards.append(horiz_move_config)
+                res_mults.append(2)
+                res_cases.append("Far move on horizontal cross")
+
             if stayed:
-                cases.append("Stay move on horizontal cross")
-                mults = np.append(mults, 1)
-                wc_split_config_y = horiz_stay_config[:,1]
-                split = True
-        else: 
-            if stayed:
-                cases.append("Stay move on horizontal cross")
-                mults = np.append(mults, 1)
-                wc_new_config_y = horiz_stay_config[:,1]
-            else:
-                raise Exception("W/C did not move properly at horizontal cross")            
-# STAGE 1 CASE 3 
-    elif stage == 1:
+                res_boards.append(horiz_stay_config)
+                res_mults.append(1)
+                res_cases.append("Stay move on horizontal cross")
+
+            if (not moved_far) and (not stayed):
+                    raise Exception("W/C did not move properly at horizontal cross")            
+
+    return res_boards, res_mults, res_cases
+
+def get_case3_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
+    
+    res_boards = []
+    res_mults = []
+    res_cases = []
+    
+    wc_x = wc_pos[:,0]
+    wc_y = wc_pos[:,1]
+    
+    if(stage == 1):
         # CASE 3: Awc = Attached Checker
         row_i = min(desc[0][0], desc[1][0])
         col_j = min(desc[0][1], desc[1][1])
@@ -470,7 +459,7 @@ def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
         
         l = col_j - min(asc[0][1], asc[1][1]) 
         
-        if (row_i not in wc_x) or wc_pos[np.where(wc_x == row_i)[0], 1] != bc_pos[np.where(bc_x == row_i)[0], 1]:
+        if (row_i not in wc_x) or wc_pos[np.where(wc_x == row_i)[0], 1] != bc_pos[np.where(bc_pos[:,0] == row_i)[0], 1]:
             # Shouldn't happen as given in cases
             raise Exception("In Stage 1 Case 3, but no attached white checker was found at i=" + str(row_i))
         else:
@@ -478,6 +467,7 @@ def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
             if row_i < n-1:
                 opp_im = symm_ind(board_ind(inv_board_ind(row_i,n) - 1, n), n) 
                 
+                temp_config = copy.deepcopy(wc_pos)
                 if (col_j in wc_y) and (wc_pos[np.where(wc_y == col_j)[0], 0] == opp_im):
                     # CASE 3.1  
                     
@@ -500,22 +490,17 @@ def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
                         on_col_j_wc = wc_pos[on_col_j_ind]
                         
                         # unhappy moves 1 to left, forces swap to move to j, forces j to move to symm of previous unhappy col
-                        wc_new_config_y[sad_NE_ind] -= 1
-                        wc_new_config_y[swap_3_1_ind] = on_col_j_wc[1]
-                        wc_new_config_y[on_col_j_ind] = col_j - l
-                        
-                        cases.append("Stage 1 Case 3.1 - Small move variant")
+                        temp_config[sad_NE_ind, 1] -= 1
+                        temp_config[swap_3_1_ind, 1] = on_col_j_wc[1]
+                        temp_config[on_col_j_ind, 1] = col_j - l
                         
                     else:
                         moved_left = get_move_left(bc_pos_next, wc_pos, [np.where(wc_x == row_i)[0][0], np.where(wc_y == col_j)[0][0]], n)
-                        wc_new_config_x = moved_left[:,0]
-                        wc_new_config_y = moved_left[:,1]
-                        
-                        cases.append("Stage 1 Case 3.1 - Large move variant")
+                        temp_config = moved_left
                     
-                    
-                    mults = np.append(mults, 1)
-                    
+                    res_boards.append(temp_config)
+                    res_mults.append(1)
+                    res_cases.append("Stage 1 Case 3.1")
                 else:
                     # CASE 3.2
                     wc0_ind = np.where(wc_x == row_i)[0][0]
@@ -549,11 +534,12 @@ def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
                         raise Exception("Stage 1 Case 3.2.1 tried to find a SW to swap with, but given wc was too far left/down.")
                         
                     # Found a sw checker for case 3.2.1 as expected
-                    wc_new_config_y[sw_ind] = wc0[1]
-                    wc_new_config_y[wc0_ind] = sw_j
+                    temp_config[sw_ind, 1] = wc0[1]
+                    temp_config[wc0_ind, 1] = sw_j
                 
-                    cases.append("Stage 1 Case 3.2.1")
-                    mults = np.append(mults, 1)
+                    res_boards.append(temp_config)
+                    res_mults.append(1)
+                    res_cases.append("Stage 1 Case 3.2.1")
                         
                     # CASE 3.2.2.
                         # Shift columns, checking to see if there is a checker that can be shifted
@@ -561,7 +547,8 @@ def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
                     s0 = wc0[1] - 1
                     
                     if(symm_ind(s0, n) in wc_y):
-                        split = True
+                        
+                        split_config = copy.deepcopy(wc_pos) 
                         
                         wc01_ind = np.where(wc_y == symm_ind(s0,n))[0][0]
                         wc01 = wc_pos[wc01_ind]
@@ -581,17 +568,21 @@ def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
                         s1 = wc01[1]
                         s2 = wc02[1]
                         
-                        wc_split_config_y[wc02_ind] = s1 - 1 
-                        wc_split_config_y[wc01_ind] = s2
-                        wc_split_config_y[wc0_ind] = s0
+                        split_config[wc02_ind, 1] = s1 - 1 
+                        split_config[wc01_ind, 1] = s2
+                        split_config[wc0_ind, 1] = s0
                         
-                        cases.append("Stage 1 Case 3.2.2")
+                        m = 1
                         if (col_j + l) == n and (wc01[0] == symm_ind(row_i + 1, n)):
-                            mults = np.append(mults, 2)
-                        else:
-                            mults = np.append(mults, 1)
-                        
-    elif stage == 2:
+                            m = 2
+                            
+                        res_boards.append(split_config)
+                        res_mults.append(m)
+                        res_cases.append("Stage 1 Case 3.2.2")
+        
+    elif(stage == 2):
+        temp_config = copy.deepcopy(wc_pos)
+        
         row_i = min(desc[0][0], desc[1][0])
         
         moving_col = np.array([desc[0][1], desc[1][1], asc[0][1], asc[1][1]])
@@ -599,6 +590,7 @@ def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
         
         # idea here is that moving_col sorted will be of form {n, j, -j, -n}
         col_j = moving_col[1]
+        #print("COL J", col_j)
         
         wc0_ind = np.where(wc_x == row_i)[0][0]
         wc01_ind = -1
@@ -627,57 +619,32 @@ def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
         SE_wc = get_SE(wc_pos, n)
         SW_wc = get_SW(wc_pos, n)
         
-        if blocked:
+        # Second condition ensures wc02 exists - cannot be considered blocked if wc02 does not exist
+        if blocked and wc02_ind >= 0:
             # Case 3.1
             wc03_ind = np.where(wc_x == wc03[0])[0][0]
                 
             print("wc03 is at ", wc03)
             print("wc0 is at ", wc0)
             print("wc01 is at ", wc01)
-            wc_new_config_y[wc0_ind] = wc03[1]
+            print("wc02 is at ", wc02)
+            temp_config[wc0_ind, 1] = wc03[1]
             # NEW 3.1 ADDED AFTER FAILURE AT [2,1]*[2]
-            wc_new_config_y[wc03_ind] = wc01[1]
-            wc_new_config_y[wc01_ind] = wc0[1]
-            cases.append("Stage 2 Case 3.1")
-            mults = np.append(mults, 1)
+            temp_config[wc03_ind, 1] = wc01[1]
+            temp_config[wc01_ind, 1] = wc0[1]
             
-#             wc_new_config_y[wc03_ind] = wc0[1]
-
-                
-#             # In new configuration! Make sure this is happening with wc_new_config
-#             wc_new_config_temp = np.zeros((len(wc_x), 2), dtype = int)
-#             wc_new_config_temp[:,0] = wc_new_config_x
-#             wc_new_config_temp[:,1] = wc_new_config_y
-                
-#             SE_wc = get_SE(wc_new_config_temp, n)
-#             # must be a SE checker SW of 01
-#             SE_to_swap_ind = -1
-#             SE_to_swap = [-1,2*n]
-#             for j in range(0, len(SE_wc)):
-#                 if(SE_wc[j][0] > wc01[0] and 
-#                    SE_wc[j][1] < wc01[1] and
-#                    SE_wc[j][1] < SE_to_swap[1]):
-#                     SE_to_swap_ind = j
-#                     SE_to_swap = [SE_wc[j][0], SE_wc[j][1]]
-                
-#             if SE_to_swap_ind != -1:
-#                 wc_new_config_y[wc01_ind] = SE_to_swap[1]
-#                 wc_new_config_y[SE_to_swap_ind] = wc01[1]
-#                 cases.append("Stage 2 Case 3.1")
-#                 mults = np.append(mults, 1)
-                
-#             else:
-#                 raise Exception("In Case 3.1 failed to swap 01")
+            res_boards.append(temp_config)
+            res_mults.append(1)
+            res_cases.append("Stage 2 Case 3.1 (blocked)")
                     
-        elif not blocked:
+        # Second part of elif is wc02 not existing, since this means there can be no blocker
+        elif (not blocked or wc02_ind == -1):
             # Split cases
             
             # Case 3.2.1
-            wc_new_config_y[wc0_ind] = 0
+            temp_config[wc0_ind, 1] = 0
                 
-            wc_new_config_temp = np.zeros((len(wc_x), 2), dtype = int)
-            wc_new_config_temp[:,0] = wc_new_config_x
-            wc_new_config_temp[:,1] = wc_new_config_y
+            testing_config = copy.deepcopy(temp_config)
                 
             made_02_happy = False
             made_01_happy = False
@@ -688,12 +655,12 @@ def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
             if (wc02_ind != -1):
                 while not made_02_happy and new_02_col < 2*n:
                     wc02_test = [wc02[0], new_02_col]
-                    # changing wc_new_config_temp to make check_happy not test against wc02_test
-                    wc_new_config_temp[wc02_ind] = wc02_test
-                    is_hap, r = check_happy(bc_pos_next, wc_new_config_temp, wc02_test, n)
+                    # changing testing_config to make check_happy not test against wc02_test
+                    testing_config[wc02_ind] = wc02_test
+                    is_hap, r = check_happy(bc_pos_next, testing_config, wc02_test, n)
                     if is_hap:
                         made_02_happy = True
-                        wc_new_config_y[wc02_ind] = new_02_col
+                        temp_config[wc02_ind, 1] = new_02_col
                     else:
                         new_02_col += 1
             else:
@@ -701,13 +668,12 @@ def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
             
             while not made_01_happy and new_01_col >= 0:
                 wc01_test = [wc01[0], new_01_col]
-                # changing wc_new_config_temp to make check happy not test against wc01_test
-                wc_new_config_temp[wc01_ind] = wc01_test
-                #print ("NEW CONFIG TEMP", wc_new_config_temp)
-                is_hap, r = check_happy(bc_pos_next, wc_new_config_temp, wc01_test, n)
+                # changing testing_config to make check happy not test against wc01_test
+                testing_config[wc01_ind] = wc01_test
+                is_hap, r = check_happy(bc_pos_next, testing_config, wc01_test, n)
                 if is_hap:
                     made_01_happy = True
-                    wc_new_config_y[wc01_ind] = new_01_col
+                    temp_config[wc01_ind, 1] = new_01_col
                     #print(" MADE 01 HAPPY from ", wc01[1], " to ", new_01_col)
                 else:
                     new_01_col -= 1
@@ -717,19 +683,16 @@ def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
             elif not made_01_happy:
                 raise Exception("Case 3.2.1 could not move 01 left to be happy. 01 at ", wc01)
             else:
-                cases.append("Stage 2 Case 3.2.1")
-                mults = np.append(mults, 1)
-# Previously used this, but I think 3.2.1 does not accrue multiplicity, maybe change if it isn't correct
-#                 if wc02_ind != -1:
-#                     mults = np.append(mults, 2)
-#                 else: 
-#                     mults = np.append(mults, 1)
-                
+                res_boards.append(temp_config)
+                res_mults.append(1)
+                res_cases.append("Stage 2 Case 3.2.1")
                     
             # Case 3.2.2
                 # first finding if any checkers in SE are SW of wc0
             wc04_ind = -1
             wc04 = [-1,-1]
+        
+            # Three possible swaps - move wc0 one to left, to -1 column (1 right of vertical midline), or to n column (far left)
         
             for i in range(0, len(SE_wc)):
                 if (SE_wc[i][0] > wc0[0] and
@@ -739,76 +702,141 @@ def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
                     wc04_ind = np.where(wc_x == SE_wc[i][0])[0][0]
                     wc04 = SE_wc[i]
             
-            # found a valid wc04 to swap with
+            # 3.2.2.1 - found a valid wc04 to swap with
             if (wc04_ind != -1):
+                temp_config = copy.deepcopy(wc_pos)
                 # replaced with updated 3.2.2.1 logic
-                wc_split_config_y[wc0_ind] = wc04[1]
-                wc_split_config_y[wc01_ind] = wc0[1]
-                wc_split_config_y[wc04_ind] = wc01[1]
+                temp_config[wc0_ind, 1] = wc04[1]
+                temp_config[wc01_ind, 1] = wc0[1]
+                temp_config[wc04_ind, 1] = wc01[1]
                 
                 if wc01_ind == wc0_ind:
                     raise Exception("Stage 2 Case 3.2.2.1 wc0 and wc01 are the same")
                 
-#                 wc_split_config_temp = np.zeros((len(wc_x), 2), dtype = int)
-#                 wc_split_config_temp[:,0] = wc_split_config_x
-#                 wc_split_config_temp[:,1] = wc_split_config_y
-                
-#                 # looking for checker SW of wc01 to swap with:
-#                 wc_sw01_ind = -1
-#                 wc_sw01 = [-1,-1]
-#                 for i in range(0, len(wc_split_config_x)):
-#                     if (wc_split_config_temp[i][0] > wc01[0] and
-#                         wc_split_config_temp[i][1] < wc01[1] and
-#                         wc_split_config_temp[i][1] > wc_sw01[1]):
-                    
-#                         wc_sw01_ind = i
-#                         wc_sw01 = wc_split_config_temp[i]
-                    
-#                 # Not gauranteed to occur, but will cause a split
-#                 if wc_sw01_ind != -1:
-#
-#                     wc_split_config_y[wc01_ind] = wc_sw01[1]
-#                     wc_split_config_y[wc_sw01_ind] = wc_sw01[1]
-                # Removed above because I think it's not necessary as long as wc01 always exists properly
-                cases.append("Stage 2 Case 3.2.2.1")
-                mults = np.append(mults, 1)
-                    
-                split = True
-            else:
-                wc04_ind = -1
-                wc04 = [-1,-1]
-                
+                res_boards.append(temp_config)
+                res_mults.append(1)
+                res_cases.append("Stage 2 Case 3.2.2.1")
+            
+            #
+            wc04_ind = -1
+            wc04 = [2*n,-1]
+        
+            # 3.2.2.2 - seeking a valid wc04 to swap with - highest such wc
+            if (row_i < n-1):
                 for j in range(len(SW_wc)):
                     if (SW_wc[j][0] > symm_ind(row_i, n)):
                         wc04_ind = np.where(wc_x == SW_wc[j][0])[0][0]
                         wc04 = SW_wc[j]
-                
+            
+            if (wc04_ind != -1) :
                 if row_i < n-1 and wc04_ind != -1:
+                    temp_config = copy.deepcopy(wc_pos)
+                    
                     # move left 0 to 04 symmetric column
-                    wc_split_config_y[wc0_ind] = symm_ind(wc04[1], n)
+                    temp_config[wc0_ind, 1] = symm_ind(wc04[1], n)
                     # swap 01 and 04
-                    wc_split_config_y[wc01_ind] = wc04[1] - 1
-                    wc_split_config_y[wc04_ind] = wc01[1]
+                    temp_config[wc01_ind, 1] = wc0[1]
+                    temp_config[wc04_ind, 1] = wc01[1]
                     
-                    split = True
-                    
-                    cases.append("Stage 2 Case 3.2.2.2")
-                    mults = np.append(mults, 1)
+                    res_boards.append(temp_config)
+                    res_mults.append(1)
+                    res_cases.append("Stage 2 Case 3.2.2.2")
                     
     else:
-        raise Exception("Failed to identify Stage/Case.")
+        return Exception("Invalid stage passed to case 3")
     
-    wc_new_config = np.zeros((len(wc_x), 2), dtype = int)
-    wc_new_config[:,0] = wc_new_config_x
-    wc_new_config[:,1] = wc_new_config_y
+    return res_boards, res_mults, res_cases
+
+############################################################################################################## END CASE MOVES
+
+# bc_pos and wc_pos are arrays of (r,c) ordered symm. pairs, is either 1 or 2
+# desc, asc handle moving rows/columns (along with taking symm pairs) 
+
+def get_wc_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage):
     
-    wc_new_configs = [wc_new_config]
+    wc_x = wc_pos[:,0]
+    wc_y = wc_pos[:,1]
     
-    if split:
-        wc_split_config = np.zeros((len(wc_x), 2), dtype = int)
-        wc_split_config[:,0] = wc_split_config_x
-        wc_split_config[:,1] = wc_split_config_y
+    # Determines whether or not this move breaks into multiple cases. Cases returned as strings for verification
+    boards = []
+    mults = []
+    cases = []
+    
+    desc = np.array(desc, dtype=int)
+    asc = np.array(asc, dtype=int)
+    
+    desc_rows = desc[:,0]
+    asc_rows = asc[:,0]
+    
+    unhappy_ind = np.array([], dtype=int)
+    desc_row_ind = np.array([], dtype=int)
+    asc_row_ind = np.array([], dtype=int)
+    asc_match_ind = np.array([], dtype=int)
+    
+    # Gets unhappy checkers, finds white checkers on asc, desc rows 
+    for i in range(0, len(wc_x)):
+        happiness, reasons = check_happy(bc_pos_next, wc_pos, wc_pos[i], n)
+        if(not happiness):
+            unhappy_ind = np.append(unhappy_ind, i)
+            if (wc_x[i] in asc_rows):
+                asc_match_ind = np.append(asc_match_ind, i)
+        if(wc_x[i] in desc_rows):
+            desc_row_ind = np.append(desc_row_ind, i)
+        if(wc_x[i] in asc_rows):
+            asc_row_ind = np.append(asc_row_ind, i)
+            
+    # Checkers on consecutive moving rows for case 2
+    consec = []
+    partner = []
+    for s in desc_row_ind:
+        for t in asc_row_ind:
+            if (wc_x[s] + 1 == wc_x[t]):
+                consec.append(s)
+                partner.append(t)
+                # print("FOUND CONSEC + PARTNER at ", consec, partner)
+                
+    #Stages don't matter for cases 0,1,2 so those are done first
+    if len(unhappy_ind) == 0:
+        # CASE 0: where all are happy. Do nothing in this case.
+        boards.append(wc_pos)
+        mults.append(1)
+        cases.append("Case 0: All checkers happy after black checker move")
+    elif desc_rows[0] == n-1:
+        # CASE 0.5: move on horizontal, done before case 1 since 1 checker may want to ascend
+        tbs, tms, tcs = get_horiz_move(bc_pos, bc_pos_next, wc_pos, n)
+        num_boards = len(tbs)
+        if (num_boards == len(tms) and num_boards == len(tcs)):
+            for i in range(0, num_boards):
+                boards.append(tbs[i])
+                mults.append(tms[i])
+                cases.append(tcs[i])
+        else:
+            return Exception("Move on horizontal, number of boards and number of mults mismatch")
+    elif ((len(desc_row_ind) == 0 ) and (len(asc_row_ind) > 0)):
         
-        wc_new_configs.append(wc_split_config)
+        # CASE 1: where moving up as a result of wc on asc row(s)
+        tb, tm = get_case1_move(wc_pos, asc_match_ind)
+        boards.append(tb)
+        mults.append(tm)
+        cases.append("Case 1: Moving up as a result of white checkers on ascending row(s)")
         
-    return split, wc_new_configs, cases, mults
+    elif (len(consec) > 0):
+        # CASE 2: where on consecutive moving rows
+        # Swap move
+        tb, tm = get_case2_move(wc_pos, consec, partner)
+        boards.append(tb)
+        mults.append(tm)
+        cases.append("Case 2: Swap resulting from white checkers on consecutive rows")
+        
+    else:
+        tbs, tms, tcs = get_case3_move(bc_pos, bc_pos_next, wc_pos, desc, asc, n, stage)
+        num_boards = len(tbs)
+        if (num_boards == len(tms) and num_boards == len(tcs)):
+            for i in range(0, num_boards):
+                boards.append(tbs[i])
+                mults.append(tms[i])
+                cases.append(tcs[i])
+        else:
+            return Exception("Case 3 move, mismatch on boards, mults & cases")
+    
+    return boards, mults, cases

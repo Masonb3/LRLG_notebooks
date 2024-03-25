@@ -119,7 +119,6 @@ def get_bc_perm_set(n):
         
         asc = []
         desc = []
-        case = ""
         
         while seeking_i and i <= 0:
             
@@ -155,8 +154,6 @@ def get_bc_perm_set(n):
                     
                         seeking_j = False
                         seeking_i = False
-                        
-                        case = " case 1 "
           
                     else:
                         j += 1
@@ -185,8 +182,6 @@ def get_bc_perm_set(n):
                 
                 seeking_j = False
                 seeking_i = False
-                
-                case = " case 2"
             
             i += 1
             
